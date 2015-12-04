@@ -22,7 +22,7 @@ To learn how to create the FDA Adverse Event Database check [here](https://githu
 # Import the module
 import faers
 
-# Instantiate and establish connection to FAERS database. 
+# Initialize class and establish connection to FAERS database. 
 f = faers.FAERS("faers.db")
 
 # Find events commonly reported with certain drug.
