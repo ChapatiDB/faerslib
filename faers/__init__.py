@@ -134,7 +134,7 @@ class FAERS:
         """
         result = self.drug_event_stats(drug, event)
         try:
-            mgps = (result["A"]*(result["A"] + result["B"] + result["C"] + result["D"])) / float((result["A"] + result["C"])+(result["A"] + result["B"]))
+            mgps = (result["A"]*(result["A"] + result["B"] + result["C"] + result["D"])) / float((result["A"] + result["C"])*(result["A"] + result["B"]))
         except:
             mgps = None
         result["MGPS"] = mgps
