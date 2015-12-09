@@ -62,6 +62,7 @@ f.find_like_drugs("pril")
 ##### Proportional Reporting Ratio
 ```
 # Compute Proportional Reporting Ratio (PRR) for a drug-event pair.
+# Returns the PRR as well as 95% CI
 f.prr("metoprolol", "nausea")
 
 ## The prr method will standardize drug terms so that following two are equivalent
@@ -80,5 +81,18 @@ f.mine_prr_by_drug("natalizumab")
 # Compute PRR for all drugs given an event.
 f.mine_prr_by_event("progressive multifocal leukoencephalopathy")
 ```
+##### Reporting Odds Ratio
+```
+# Compute the Reporting Odds Ratio (ROR) for a given drug-event pair.
+# Returns the ROR as well as 95% CI.
+f.ror("natalizumab", "progressive multifocal leukoencephalopathy")
+```
+
+##### Multi-item Gamma Poisson Shrinker (MGPS)
+```
+# Compute the Multi-item Gamma Poisson Shrinker (MGPS) for a given drug-event pair.
+f.mgps("natalizumab", "progressive multifocal leukoencephalopathy")
+```
+
 ## Questions/issues/contact
 mlbernauer@gmail.com

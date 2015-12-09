@@ -1,5 +1,6 @@
 import sqlite3
 import drugstandards as drugs
+import math
 
 class FAERS:
     def __init__(self, filename, countries=["UNITED STATES"], years="*"):
@@ -30,7 +31,7 @@ class FAERS:
             sql = "CREATE TEMP TABLE STANDARD_DRUG AS SELECT ISR, REPLACEMENT AS DRUGNAME FROM DRUG INNER JOIN DRUG_MAP ON (DRUG.DRUGNAME = DRUG_MAP.ORIGINAL) WHERE ISR IN (SELECT ISR FROM DEMO WHERE REPORTER_COUNTRY LIKE %s AND EVENT_DT LIKE %s)" % (countries, years)
             self.conn.execute(sql)
             # Create DRUG_EVENT_COUNT table 
-            sql = "CREATE TEMP TABLE DRUG_EVENT_COUNT AS SELECT DRUGNAME, PT, COUNT(DISTINCT(ISR)) AS COUNT FROM temp.STANDARD_DRUG INNER JOIN REAC USING (ISR) GROUP BY ISR, DRUGNAME, PT"
+            sql = "CREATE TEMP TABLE DRUG_EVENT_COUNT AS SELECT DRUGNAME, PT, COUNT(DISTINCT(ISR)) AS COUNT FROM temp.STANDARD_DRUG INNER JOIN REAC USING (ISR) GROUP BY DRUGNAME, PT"
             self.conn.execute(sql)
             self.conn.execute("CREATE INDEX temp.drug_event_count_idx ON DRUG_EVENT_COUNT (DRUGNAME, PT, COUNT)")
             records = self.conn.execute("SELECT SUM(COUNT) FROM temp.DRUG_EVENT_COUNT").fetchone()[0]
@@ -53,26 +54,41 @@ class FAERS:
 
     def drug_event_stats(self, drug, event):
         """ This method computes frequencies used in calculating the PRR:
-            Freq event | drug: the frequency that event is found with drug.
-            Freq anyevent | drug: the frequency that any event is associated with drug.
-            Freq event | other drugs: the frequency that the event is observed with all other drugs.
-            Freq anyevent | other drugs: the frequnecy that any event is assciated with all other drugs.
+
+            ----------------------------------+--------------------------------------------+
+                                              | Drug of interest | All other drugs | Total |
+            ----------------------------------+------------------+-----------------+-------|
+            Adverse drug reaction of interest |        A         |        B        | A + B |
+            ----------------------------------+------------------+-----------------+-------|
+            All other adverse drug reactions  |        C         |        D        | C + D |
+            ----------------------------------+------------------+-----------------+-------|
+            Total                             |       A+C        |       B+D       |A+B+C+D|
+            -------------------------------------------------------------------------------+
+
         """
+#        print """
+
+#+-----------------------------------+------------------+-------------------------+
+#|                                   | Drug of interest | All other drugs | Total |
+#+-----------------------------------+------------------+-----------------+-------|
+#| Adverse drug reaction of interest |        A         |        B        | A + B |
+#+-----------------------------------+------------------+-----------------+-------|
+#| All other adverse drug reactions  |        C         |        D        | C + D |
+#+-----------------------------------+------------------+-----------------+-------|
+#| Total                             |       A+C        |       B+D       |A+B+C+D|
+#+-----------------------------------+------------------+-----------------+-------+
+#"""
         drug = drugs.standardize([drug])[0]
         event = event.upper()
-        event_drug = "SELECT SUM(COUNT) FROM DRUG_EVENT_COUNT WHERE DRUGNAME = \"%s\" AND PT = \"%s\"" % (drug, event)
-        anyevent_drug = "SELECT SUM(COUNT) FROM DRUG_EVENT_COUNT WHERE DRUGNAME = \"%s\"" % (drug)
-        event_otherdrugs = "SELECT SUM(COUNT) FROM DRUG_EVENT_COUNT WHERE DRUGNAME <> \"%s\" AND PT = \"%s\"" % (drug, event)
-        anyevent_otherdrugs = "SELECT SUM(COUNT) FROM DRUG_EVENT_COUNT WHERE DRUGNAME <> \"%s\"" % (drug)
-        event_drug = self.conn.execute(event_drug).fetchone()[0]
-        anyevent_drug = self.conn.execute(anyevent_drug).fetchone()[0]
-        event_otherdrugs = self.conn.execute(event_otherdrugs).fetchone()[0]
-        anyevent_otherdrugs = self.conn.execute(anyevent_otherdrugs).fetchone()[0]
-        drug_terms = self.conn.execute("SELECT DRUGNAME FROM temp.DRUG_EVENT_COUNT WHERE DRUGNAME = \"%s\" GROUP BY DRUGNAME" % drug).fetchall()
-        drug_terms = [str(i[0]) for i in drug_terms]
-        event_terms = self.conn.execute("SELECT PT FROM temp.DRUG_EVENT_COUNT WHERE PT = \"%s\" GROUP BY PT" % event).fetchall()
-        event_terms = [str(i[0]) for i in event_terms]
-        return {"drug_terms":drug_terms, "event_terms":event_terms, "event_drug":event_drug, "anyevent_drug":anyevent_drug, "event_otherdrugs":event_otherdrugs, "anyevent_otherdrugs":anyevent_otherdrugs}
+        A = "SELECT SUM(COUNT) FROM temp.DRUG_EVENT_COUNT WHERE DRUGNAME = \"%s\" AND PT = \"%s\"" % (drug, event)
+        B = "SELECT SUM(COUNT) FROM temp.DRUG_EVENT_COUNT WHERE DRUGNAME <> \"%s\" AND PT = \"%s\"" % (drug, event)
+        C = "SELECT SUM(COUNT) FROM temp.DRUG_EVENT_COUNT WHERE DRUGNAME = \"%s\" AND PT <> \"%s\"" % (drug, event)
+        D = "SELECT SUM(COUNT) FROM temp.DRUG_EVENT_COUNT WHERE DRUGNAME <> \"%s\" AND PT <> \"%s\"" % (drug, event)
+        A = self.conn.execute(A).fetchone()[0]
+        B = self.conn.execute(B).fetchone()[0]
+        C = self.conn.execute(C).fetchone()[0]
+        D = self.conn.execute(D).fetchone()[0]
+        return {"A":A, "B":B, "C":C, "D":D, "drug":drug, "event":event}
 
     def prr(self, drug, event):
         """ This method calculates the Proportional Reporting Ratio (PRR) of a given
@@ -80,11 +96,55 @@ class FAERS:
         """
         result = self.drug_event_stats(drug, event)
         try:
-            prr = (result["event_drug"]/float(result["anyevent_drug"])) / (result["event_otherdrugs"]/float(result["anyevent_otherdrugs"]))
+            prr = (result["A"]/float(result["A"] + result["B"])) / (result["C"] / float(result["C"] + result["D"]))
+            ln_prr = math.log(prr)
+            se_prr = math.sqrt((1/float(result["A"])) + (1/float(result["B"])) + (1/float(result["C"])) + (1/float(result["D"])))
+            lower_lim = ln_prr - (1.96*se_prr)
+            upper_lim = ln_prr + (1.96*se_prr)
+            lower_lim = math.exp(lower_lim)
+            upper_lim = math.exp(upper_lim)
+            result["CI95"] = [lower_lim, upper_lim]
         except:
             prr = None
-        result["proportional_reporting_ratio"] = prr
+        result["PRR"] = prr
         return result
+
+    def ror(self, drug, event):
+        """ This method returns the Reporting Odds Ratio (ROR) of a given
+            drug-event pair.
+        """
+        result = self.drug_event_stats(drug, event)
+        try:
+            ror = (result["A"]/float(result["C"])) / (result["B"]/float(result["D"]))
+            ln_ror = math.log(ror)
+            se_ror = math.sqrt((1/float(result["A"])) + (1/float(result["B"])) + (1/float(result["C"])) + (1/float(result["D"])))
+            lower_lim = ln_ror - (1.96*se_ror)
+            upper_lim = ln_ror + (1.96*se_ror)
+            lower_lim = math.exp(lower_lim)
+            upper_lim = math.exp(upper_lim)
+            result["CI95"] = [lower_lim, upper_lim]
+        except:
+            ror = None
+        result["ROR"] = ror
+        return result
+
+    def mgps(self, drug, event):
+        """ This method returns the Multi-item Gamma Poisson Shrinker (MGPS) of a given
+            drug-event pair.
+        """
+        result = self.drug_event_stats(drug, event)
+        try:
+            mgps = (result["A"]*(result["A"] + result["B"] + result["C"] + result["D"])) / float((result["A"] + result["C"])+(result["A"] + result["B"]))
+        except:
+            mgps = None
+        result["MGPS"] = mgps
+        return result
+
+    def bcpnn(self, drug, event):
+        """ This method returns the Bayesian Confidence Propagation Neural Network (BCPNN) of a given
+            drug-event pair.
+        """
+        result = self.drug_event_stats(drug, event)
 
     def associated_events(self, drugname, sortby="COUNT"):
         """ This method will return a sorted list of drug-event frequencies.
@@ -138,11 +198,11 @@ class FAERS:
         """
         drug = drugs.standardize([drug])[0]
         sql = "SELECT PT FROM temp.DRUG_EVENT_COUNT WHERE DRUGNAME = '%s' AND COUNT >= %s" % (drug, str(n))
-        result = self.conn.execute(sql)
+        result = self.conn.execute(sql).fetchall()
         events = [str(i[0]) for i in result]
         prr_list = [self.prr(drug, e) for e in events]
-        prr_list = [i for i in prr_list if i['proportional_reporting_ratio'] != None]
-        idx = sorted(range(len(prr_list)), key = lambda k: -prr_list[k]['proportional_reporting_ratio'])
+        prr_list = [i for i in prr_list if i['PRR'] != None]
+        idx = sorted(range(len(prr_list)), key = lambda k: -prr_list[k]['PRR'])
         prr_list = [prr_list[i] for i in idx]
         return prr_list
 
@@ -157,5 +217,4 @@ class FAERS:
         prr_list = [i for i in prr_list if i['proportional_reporting_ratio'] != None]
         idx = sorted(range(len(prr_list)), key=lambda k: -prr_list[k]['proportional_reporting_ratio'])
         prr_list = [prr_list[i] for i in idx]
-        return prr_list
-        
+        return prr_list        
