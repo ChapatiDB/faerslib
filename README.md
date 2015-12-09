@@ -81,7 +81,7 @@ f.mine_prr_by_drug("natalizumab")
 # Compute PRR for all drugs given an event.
 f.mine_prr_by_event("progressive multifocal leukoencephalopathy")
 ```
-##### Reporting Odds Ratio
+##### Reporting Odds Ratio (ROR)
 ```
 # Compute the Reporting Odds Ratio (ROR) for a given drug-event pair.
 # Returns the ROR as well as 95% CI.
